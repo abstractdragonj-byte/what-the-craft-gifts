@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: "Outfit", "Avenir Next", ui-sans-serif, system-ui, sans-serif;
+  --color-plaster: #f3efe8;
+  --color-plaster-deep: #e6dfd2;
+  --color-card: #fbf8f3;
+  --color-ink: #2c2622;
+  --color-ink-soft: #5e564e;
+  --color-brass: #8c6a3d;
+  --color-brass-deep: #6d522f;
+  --color-sage: #1e7a46;
+  --color-on-sage: #f4f8f5;
+  --color-line: #ddd4c6;
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  html,
+  body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--color-plaster);
+    color: var(--color-ink);
+  }
+  body {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brass);
+    outline-offset: 2px;
+  }
+}
+
+.photo-shelf {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-plaster-deep);
+}
+
+.photo-shelf-bg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.photo-shelf-items {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 21%;
+  height: 50%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.piece-sit {
+  flex: 0 1 22%;
+  height: 88%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform-origin: center bottom;
+  transition: transform 200ms ease;
+}
+
+.piece-sit img {
+  max-width: 88%;
+  max-height: 88%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 8px rgb(44 38 34 / 0.32));
+}
+
+.piece-sit.is-held {
+  transform: translateY(-8%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .piece-sit:hover {
+    transform: translateY(-8%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .piece-sit,
+  .piece-sit.is-held,
+  .piece-sit:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
