@@ -1,23 +1,59 @@
-import { neon } from "@neondatabase/serverless";
+import { env } from "cloudflare:workers";
 
-export type DbSource = "neon";
+export type DbSource = "d1";
 
-export const dbSource: DbSource = "neon";
+export const dbSource: DbSource = "d1";
 
 export interface Sql {
-  <T = Record<string, unknown>>(
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ): Promise<T[]>;
-  query<T = Record<string, unknown>>(
-    text: string,
-    params?: unknown[],
-  ): Promise<T[]>;
+  <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
 }
 
-type Run = <T>(text: string, params: unknown[]) => Promise<T[]>;
+type D1Value = string | number | boolean | null | ArrayBuffer | ArrayBufferView;
 
-function toSql(run: Run): Sql {
+type D1QueryResult<T> = {
+  success: boolean;
+  results?: T[];
+  error?: string;
+};
+
+type D1PreparedStatement = {
+  bind(...values: D1Value[]): D1PreparedStatement;
+  all<T = Record<string, unknown>>(): Promise<D1QueryResult<T>>;
+};
+
+type D1Database = {
+  prepare(query: string): D1PreparedStatement;
+};
+
+function toD1Value(value: unknown): D1Value {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  ) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  throw new TypeError(`Unsupported D1 parameter type: ${typeof value}`);
+}
+
+function bindParameters(text: string, params: unknown[]) {
+  const values: D1Value[] = [];
+  const query = text.replace(/\$(\d+)/g, (_placeholder, rawIndex: string) => {
+    const index = Number(rawIndex) - 1;
+    if (index < 0 || index >= params.length) {
+      throw new Error(`Missing value for SQL parameter $${rawIndex}.`);
+    }
+    values.push(toD1Value(params[index]));
+    return "?";
+  });
+  return { query, values };
+}
+
+function toSql(database: D1Database): Sql {
   const sql = (async <T = Record<string, unknown>>(
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -26,21 +62,33 @@ function toSql(run: Run): Sql {
     for (let i = 0; i < values.length; i += 1) {
       text += `$${i + 1}${strings[i + 1]}`;
     }
-    return run<T>(text, values);
+    return run<T>(database, text, values);
   }) as unknown as Sql;
   sql.query = <T = Record<string, unknown>>(text: string, params: unknown[] = []) =>
-    run<T>(text, params);
+    run<T>(database, text, params);
   return sql;
 }
 
-function getDatabaseUrl(): string {
-  const value = typeof process !== "undefined" ? process.env.DATABASE_URL?.trim() : undefined;
-  if (!value) {
+async function run<T>(database: D1Database, text: string, params: unknown[]): Promise<T[]> {
+  const { query, values } = bindParameters(text, params);
+  const result = await database
+    .prepare(query)
+    .bind(...values)
+    .all<T>();
+  if (!result.success) {
+    throw new Error(result.error || "Cloudflare D1 query failed.");
+  }
+  return result.results ?? [];
+}
+
+function getDatabase(): D1Database {
+  const database = env.DB;
+  if (!database) {
     throw new Error(
-      "DATABASE_URL is missing from this Cloudflare Worker. Add it as a secret under Settings > Variables and Secrets.",
+      "Cloudflare D1 binding DB is missing. Bind the whatthecraftgifts database to this Worker.",
     );
   }
-  return value;
+  return database;
 }
 
 export function getSql(): Promise<Sql> {
@@ -49,12 +97,7 @@ export function getSql(): Promise<Sql> {
       "@/lib/db is server-only — call getSql() from a createServerFn handler or a server route loader, never from client code.",
     );
   }
-  const query = neon(getDatabaseUrl());
-  return Promise.resolve(
-    toSql(async <T>(text: string, params: unknown[]) =>
-      (await query.query(text, params)) as T[],
-    ),
-  );
+  return Promise.resolve(toSql(getDatabase()));
 }
 
 export function ensureDbReady(): Promise<void> {

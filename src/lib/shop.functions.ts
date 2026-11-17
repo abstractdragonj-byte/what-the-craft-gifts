@@ -99,10 +99,10 @@ type ProductRow = {
   stripe_link_id: string;
   stripe_link: string;
   stripe_amount: number;
-  featured: boolean;
+  featured: boolean | number;
   feature_order: number;
   list_order: number;
-  sold: boolean;
+  sold: boolean | number;
   listed_at: string;
   sold_at: string | null;
 };
@@ -110,7 +110,7 @@ type ProductRow = {
 const PRODUCT_SQL = `select id, name, summary, description, price_cents, cost_cents, category, image,
   image_back, image_left, image_right,
   stripe_product_id, stripe_price_id, stripe_link_id, stripe_link, stripe_amount,
-  featured, feature_order, list_order, sold, listed_at::text as listed_at, sold_at::text as sold_at
+  featured, feature_order, list_order, sold, listed_at, sold_at
   from products order by list_order, name`;
 
 const requireDesk = createServerOnlyFn(async () => {
@@ -131,16 +131,20 @@ function pub(row: ProductRow): PublicProduct {
     imageLeft: row.image_left ?? "",
     imageRight: row.image_right ?? "",
     stripeLink: row.stripe_link ?? "",
-    featured: Boolean(row.featured),
+    featured: sqlBoolean(row.featured),
     featureOrder: Number(row.feature_order),
     listOrder: Number(row.list_order),
-    sold: Boolean(row.sold),
+    sold: sqlBoolean(row.sold),
     listedAt: String(row.listed_at),
   };
 }
 
 function deskProduct(row: ProductRow): DeskProduct {
   return { ...pub(row), costCents: Number(row.cost_cents), soldAt: row.sold_at ? String(row.sold_at) : null };
+}
+
+function sqlBoolean(value: boolean | number): boolean {
+  return value === true || value === 1;
 }
 
 async function ensure() {
@@ -156,7 +160,7 @@ async function ensure() {
     )
     on conflict (id) do nothing
   `;
-  const count = await sql<{ n: number }>`select count(*)::int as n from products`;
+  const count = await sql<{ n: number }>`select count(*) as n from products`;
   if (Number(count[0]?.n ?? 0) > 0) return;
   for (const item of SEED_PRODUCTS) {
     await sql`
@@ -183,7 +187,7 @@ async function readSettings(): Promise<Settings> {
     week_note: string;
     contact_email: string;
     stripe_url: string;
-    stripe_ready: boolean;
+    stripe_ready: boolean | number;
   }>`select shop_name, week_note, contact_email, stripe_url,
             (coalesce(stripe_key, '') <> '') as stripe_ready
      from shop_settings where id = 'main'`;
@@ -193,13 +197,13 @@ async function readSettings(): Promise<Settings> {
     weekNote: row?.week_note ?? "",
     contactEmail: row?.contact_email ?? "",
     stripeUrl: row?.stripe_url || "https://dashboard.stripe.com/",
-    stripeReady: Boolean(row?.stripe_ready) || Boolean(process.env.STRIPE_SECRET_KEY),
+    stripeReady: sqlBoolean(row?.stripe_ready ?? false) || Boolean(process.env.STRIPE_SECRET_KEY),
   };
 }
 
 async function readOffers(): Promise<Offer[]> {
   const sql = await getSql();
-  const rows = await sql<{ id: string; code: string; label: string; percent: number; active: boolean }>`
+  const rows = await sql<{ id: string; code: string; label: string; percent: number; active: boolean | number }>`
     select id, code, label, percent, active from offers order by code
   `;
   return rows.map((row) => ({
@@ -207,7 +211,7 @@ async function readOffers(): Promise<Offer[]> {
     code: row.code,
     label: row.label,
     percent: Number(row.percent),
-    active: Boolean(row.active),
+    active: sqlBoolean(row.active),
   }));
 }
 
@@ -231,18 +235,18 @@ export const fetchDesk = createServerFn({ method: "GET" }).handler(async (): Pro
   const sales = await sql.query<Sale>(
     `select id, product_id as "productId", product_name as "productName", qty,
             amount_cents as "amountCents", cost_cents as "costCents", offer_code as "offerCode",
-            channel, sold_at::text as "soldAt"
+            channel, sold_at as "soldAt"
      from sales order by sold_at desc limit 200`,
   );
   const totals = await sql<{ revenue: number; profit: number }>`
-    select coalesce(sum(amount_cents), 0)::int as revenue,
-           coalesce(sum(amount_cents - cost_cents), 0)::int as profit
+    select coalesce(sum(amount_cents), 0) as revenue,
+           coalesce(sum(amount_cents - cost_cents), 0) as profit
     from sales
   `;
   const orders = await sql.query<ShopOrder>(
     `select id, product_id as "productId", product_name as "productName",
             buyer_name as "buyerName", buyer_email as "buyerEmail", buyer_phone as "buyerPhone",
-            amount_cents as "amountCents", status, created_at::text as "createdAt"
+            amount_cents as "amountCents", status, created_at as "createdAt"
      from orders order by created_at desc limit 100`,
   );
   return {
@@ -335,7 +339,7 @@ async function listOnStripe(id: string, origin: string) {
     select id, name, summary, description, price_cents, cost_cents, category, image,
            image_back, image_left, image_right,
            stripe_product_id, stripe_price_id, stripe_link_id, stripe_link, stripe_amount,
-           featured, feature_order, list_order, sold, listed_at::text as listed_at, sold_at::text as sold_at
+           featured, feature_order, list_order, sold, listed_at, sold_at
     from products where id = ${id}
   `;
   const row = rows[0];
@@ -373,7 +377,7 @@ async function closeStripeLink(id: string) {
 
 async function syncAll(origin: string) {
   const sql = await getSql();
-  const rows = await sql<{ id: string; name: string }>`select id, name from products where sold = false order by list_order, name`;
+  const rows = await sql<{ id: string; name: string }>`select id, name from products where sold = 0 order by list_order, name`;
   let synced = 0;
   const errors: string[] = [];
   for (const row of rows) {
@@ -528,7 +532,7 @@ export const checkout = createServerFn({ method: "POST" })
     const sql = await getSql();
     const found = await sql<ProductRow>`
       select id, name, summary, description, price_cents, cost_cents, category, image,
-             featured, feature_order, list_order, sold, listed_at::text as listed_at, sold_at::text as sold_at
+             featured, feature_order, list_order, sold, listed_at, sold_at
       from products where id = ${data.productId}
     `;
     const product = found[0];
@@ -538,7 +542,7 @@ export const checkout = createServerFn({ method: "POST" })
     if (data.offerCode) {
       const offers = await sql<{ code: string; percent: number }>`
         select code, percent from offers
-        where upper(code) = ${data.offerCode.toUpperCase()} and active = true
+        where upper(code) = ${data.offerCode.toUpperCase()} and active = 1
       `;
       if (!offers[0]) return { ok: false as const, error: "That code isn't active." };
       percent = Number(offers[0].percent);
@@ -546,8 +550,8 @@ export const checkout = createServerFn({ method: "POST" })
     }
     const amount = Math.round((Number(product.price_cents) * (100 - percent)) / 100);
     const taken = await sql<{ id: string }>`
-      update products set sold = true, sold_at = now()
-      where id = ${product.id} and sold = false
+      update products set sold = 1, sold_at = datetime('now')
+      where id = ${product.id} and sold = 0
       returning id
     `;
     if (!taken[0]) return { ok: false as const, error: "That one just sold." };
@@ -578,7 +582,7 @@ export const putBack = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await requireDesk();
     const sql = await getSql();
-    await sql`update products set sold = false, sold_at = null where id = ${data.id}`;
+    await sql`update products set sold = 0, sold_at = null where id = ${data.id}`;
     try {
       await listOnStripe(data.id, "");
     } catch {
@@ -607,7 +611,7 @@ export const placeOrder = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await ensure();
     const sql = await getSql();
-    const found = await sql<{ id: string; name: string; price_cents: number; sold: boolean }>`
+    const found = await sql<{ id: string; name: string; price_cents: number; sold: boolean | number }>`
       select id, name, price_cents, sold from products where id = ${data.productId}
     `;
     const product = found[0];
@@ -638,7 +642,7 @@ export const markOrderPaid = createServerFn({ method: "POST" })
     if (!order) throw new Error("That order is gone.");
     if (order.status === "paid") return { ok: true };
     await sql`update orders set status = 'paid' where id = ${order.id}`;
-    await sql`update products set sold = true, sold_at = now() where id = ${order.product_id} and sold = false`;
+    await sql`update products set sold = 1, sold_at = datetime('now') where id = ${order.product_id} and sold = 0`;
     await sql`
       insert into sales (id, product_id, product_name, qty, amount_cents, cost_cents, offer_code, channel)
       values (${crypto.randomUUID()}, ${order.product_id}, ${order.product_name}, 1, ${Number(order.amount_cents)}, 0, '', 'online')
@@ -732,17 +736,17 @@ export const confirmPaid = createServerFn({ method: "POST" })
     if (!paid.pieceId && !paid.linkId) return { ok: false as const };
     const sql = await getSql();
     const found = paid.pieceId
-      ? await sql<{ id: string; name: string; price_cents: number; cost_cents: number; stripe_link_id: string; sold: boolean }>`
+      ? await sql<{ id: string; name: string; price_cents: number; cost_cents: number; stripe_link_id: string; sold: boolean | number }>`
           select id, name, price_cents, cost_cents, stripe_link_id, sold from products where id = ${paid.pieceId} limit 1
         `
-      : await sql<{ id: string; name: string; price_cents: number; cost_cents: number; stripe_link_id: string; sold: boolean }>`
+      : await sql<{ id: string; name: string; price_cents: number; cost_cents: number; stripe_link_id: string; sold: boolean | number }>`
           select id, name, price_cents, cost_cents, stripe_link_id, sold from products where stripe_link_id = ${paid.linkId} limit 1
         `;
     const product = found[0];
     if (!product) return { ok: false as const };
     const taken = await sql<{ id: string }>`
-      update products set sold = true, sold_at = now()
-      where id = ${product.id} and sold = false
+      update products set sold = 1, sold_at = datetime('now')
+      where id = ${product.id} and sold = 0
       returning id
     `;
     if (taken[0]) {

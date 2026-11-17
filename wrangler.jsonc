@@ -3,7 +3,16 @@
   "name": "whatthecraftgifts",
   "main": "src/server.cloudflare.ts",
   "compatibility_date": "2026-11-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "whatthecraftgifts",
+      "database_id": "c4a19ef9-ee20-41e3-996e-2f1c3683b723",
+      "migrations_dir": "migrations/d1",
+    },
+  ],
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }
