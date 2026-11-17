@@ -4,6 +4,7 @@
 .grok/
 .tanstack/
 .vercel/
+.wrangler/
 node_modules/
 dist/
 build/
@@ -13,6 +14,7 @@ attachments/
 .env
 .env.*
 !.env.example
+.dev.vars*
 *.log
 *.pid
 playwright-report/
